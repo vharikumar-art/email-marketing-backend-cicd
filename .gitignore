@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+.env   
+documents
+!documents/
+documents/*
+!documents/BACKEND_PROJECT_OVERVIEW.md

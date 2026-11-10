@@ -1,0 +1,147 @@
+from typing import Literal
+
+from pydantic import AliasChoices, BaseModel, EmailStr, Field
+
+
+class ProfileFilters(BaseModel):
+    country: list[str] = Field(default_factory=list)
+    domain: list[str] = Field(default_factory=list)
+    domainGroup: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("domainGroup", "domain_group"),
+    )
+    university: list[str] = Field(default_factory=list)
+    type: list[str] = Field(default_factory=list)  # maps to designation / industry
+    mailSource: list[str] = Field(default_factory=list)  # Google Scholar, University, Other
+    allowUsed: bool = Field(default=False, description="If True, allow reusing emails that have been used before (usageCount > 0) but are currently unlocked")
+    oldestFirst: bool = Field(
+        default=False,
+        description="If True, generate the email list from the oldest uploaded emails to the newest",
+    )
+    # ── Date filter ────────────────────────────────────────────────────────────
+    date_filter: bool = Field(default=False, description="Enable upload-date filtering when generating the email list")
+    date_range: str | None = Field(default=None, description="last_30_days | last_3_months | custom")
+    start_date: str | None = Field(default=None, description="Custom start date (YYYY-MM-DD), used when date_range='custom'")
+    end_date: str | None = Field(default=None, description="Custom end date (YYYY-MM-DD), used when date_range='custom'")
+
+
+class ProfileSendingOptions(BaseModel):
+    dailyLimit: int = Field(default=100, ge=1, le=5000)
+    delayMin: int = Field(default=30, ge=0, description="Minimum delay between sends in seconds")
+    delayMax: int = Field(default=90, ge=0, description="Maximum delay between sends in seconds")
+
+
+class FilterLimitConfig(BaseModel):
+    limit: int = Field(default=0, ge=0, description="Maximum number of emails to fetch from filtered results (0 = no limit)")
+
+
+class PromptSettings(BaseModel):
+    personalizeGreeting: bool = True
+    improveGrammar: bool = True
+    improveProfessionalism: bool = False
+    aiRewrite: bool = False
+    customInstruction: str = ""
+
+
+class Attachment(BaseModel):
+    """File attachment for profile"""
+    filename: str = Field(description="Original filename (e.g., document.pdf)")
+    filepath: str = Field(description="Server path to file (e.g., uploads/templates/abc123_document.pdf)")
+    size: int = Field(description="File size in bytes")
+
+
+class Template(BaseModel):
+    """Template model for A/B testing"""
+    name: str = Field(default="", max_length=100, description="Template name (e.g., 'Aggressive', 'Friendly')")
+    subject: str = Field(default="", max_length=500, description="Email subject line")
+    body: str = Field(default="", description="Email body content")
+    weight: int = Field(default=1, ge=1, le=100, description="Selection weight (higher = more likely)")
+
+
+class ReminderTemplate(BaseModel):
+    """Body-only A/B template for reminder campaigns."""
+    name: str = Field(default="", max_length=100)
+    body: str = Field(min_length=1)
+    weight: int = Field(default=1, ge=1, le=100)
+
+
+class ProfileCreate(BaseModel):
+    profileName: str = Field(min_length=1, max_length=100)
+    gmailAccount: EmailStr
+    signature: str = Field(default="", description="HTML signature appended to every email")
+    templates: list[Template] = Field(min_length=1, max_length=5, description="1-5 A/B testing templates (required)")
+    reminderTemplates: list[ReminderTemplate] = Field(
+        default_factory=list,
+        max_length=5,
+        description="Optional body-only A/B templates for reminder campaigns",
+    )
+    attachments: list[Attachment] = Field(default_factory=list, description="File attachments (sent with all templates)")
+    filters: ProfileFilters = Field(default_factory=ProfileFilters)
+    filterLimit: int = Field(default=0, ge=0, description="Maximum emails to fetch from filtered results (0 = no limit)")
+    sendingOptions: ProfileSendingOptions = Field(default_factory=ProfileSendingOptions)
+    promptSettings: PromptSettings = Field(default_factory=PromptSettings)
+    employee_name: str = Field(default="", description="Employee name")
+    assigned_admin: str = Field(default="", description="Assigned admin")
+
+
+class ProfileUpdate(BaseModel):
+    profileName: str | None = None
+    gmailAccount: EmailStr | None = None
+    signature: str | None = None
+    templates: list[Template] | None = None
+    reminderTemplates: list[ReminderTemplate] | None = None
+    filters: ProfileFilters | None = None
+    filterLimit: int | None = None
+    sendingOptions: ProfileSendingOptions | None = None
+    promptSettings: PromptSettings | None = None
+    employeeId: str | None = Field(default=None, description="Reassign profile to a different employee (super_admin only)")
+
+
+class ProfileOut(BaseModel):
+    id: str
+    employeeId: str
+    profileName: str
+    gmailAccount: str
+    signature: str
+    templates: list[Template]
+    reminderTemplates: list[ReminderTemplate] = Field(default_factory=list)
+    attachments: list[Attachment] = Field(default_factory=list, description="File attachments (sent with all templates)")
+    isActive: bool
+    filters: ProfileFilters
+    filterLimit: int
+    sendingOptions: ProfileSendingOptions
+    promptSettings: PromptSettings
+    createdAt: str | None = None
+    updatedAt: str | None = None
+    profileAge: str | None = None
+
+
+class TemplateAdd(BaseModel):
+    """Add a new template to a profile"""
+    name: str = Field(min_length=1, max_length=100, description="Template name (e.g., 'Aggressive', 'Friendly')")
+    subject: str = Field(min_length=1, max_length=500, description="Email subject line")
+    body: str = Field(min_length=1, description="Email body content")
+    weight: int = Field(default=1, ge=1, le=100, description="Selection weight (higher = more likely)")
+
+
+class TemplateUpdate(BaseModel):
+    """Update an existing template"""
+    name: str | None = None
+    subject: str | None = None
+    body: str | None = None
+    weight: int | None = Field(default=None, ge=1, le=100)
+
+
+class TemplateDelete(BaseModel):
+    """Delete a template"""
+    templateId: str = Field(description="ID of template to delete")
+
+
+class ProfileTestEmailRequest(BaseModel):
+    """Send a one-off test email using a profile's configured sender and template."""
+    toEmail: EmailStr = Field(description="Recipient email used only for the test send")
+    templateId: str | None = Field(default=None, description="Optional template id to use; otherwise a template is selected randomly")
+    mailType: Literal["draft", "reminder"] = Field(
+        default="draft",
+        description="Choose a draft template or a reminder template",
+    )
